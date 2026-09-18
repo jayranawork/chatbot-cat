@@ -540,9 +540,14 @@ body {
   border-color: var(--chat-accent-hover);
 }
 
-.cat-panel:has(.cat-ai-panel) .cat-ai-panel__form button:first-of-type {
+.cat-panel:has(.cat-ai-panel) .cat-ai-panel__form .cat-ai-panel__stop {
   background: var(--chat-error);
   border-color: var(--chat-error);
+}
+
+.cat-panel:has(.cat-ai-panel) .cat-ai-panel__form .cat-ai-panel__stop:hover:not(:disabled) {
+  background: #ff6d72;
+  border-color: #ff6d72;
 }
 
 .cat-ai-panel__dot {

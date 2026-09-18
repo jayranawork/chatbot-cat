@@ -1365,9 +1365,9 @@ export function CatRenderer() {
                   disabled={chatBusy}
                 />
                 {chatBusy ? (
-                  <button type="button" onClick={() => void cancelChat()}>Stop</button>
+                  <button className="cat-ai-panel__stop" type="button" onClick={() => void cancelChat()}>Stop</button>
                 ) : (
-                  <button type="submit" disabled={!chatInput.trim()}>Send</button>
+                  <button className="cat-ai-panel__submit" type="submit" disabled={!chatInput.trim()}>Send</button>
                 )}
               </form>
             </section>
