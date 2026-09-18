@@ -11,7 +11,7 @@ export class AiService {
     private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
   ) {}
 
-  async run(request: AiRequest): Promise<AiResponse> {
+  async run(request: AiRequest, onChunk?: (chunk: string) => void): Promise<AiResponse> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     this.inFlight.set(request.requestId, controller);
@@ -21,7 +21,7 @@ export class AiService {
         throw new AiProviderUnavailableError(`Provider ${this.provider.id} is unavailable`);
       }
 
-      return await this.provider.complete(request, controller.signal);
+      return await this.provider.complete(request, controller.signal, onChunk);
     } catch (error) {
       if (controller.signal.aborted) {
         throw new AiTimeoutError(`Request ${request.requestId} timed out or was cancelled`);

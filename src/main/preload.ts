@@ -91,9 +91,24 @@ contextBridge.exposeInMainWorld("desktopDevCat", {
   togglePaused: (value: boolean) => ipcRenderer.invoke("app-settings:set", { paused: value }),
   setPanelMode: (enabled: boolean) => ipcRenderer.invoke("app-window:panel-mode", enabled),
   ai: {
-    request: (payload: import("../ai/AiTypes").AiChatRequestPayload) =>
-      ipcRenderer.invoke("ai:request", payload),
+    request: (
+      payload: import("../ai/AiTypes").AiChatRequestPayload,
+      onChunk?: (chunk: string) => void,
+    ) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { requestId: string; chunk: string }) => {
+        if (data.requestId === payload.requestId) onChunk?.(data.chunk);
+      };
+      ipcRenderer.on("ai:chunk", listener);
+      return ipcRenderer.invoke("ai:request", payload).finally(() => {
+        ipcRenderer.removeListener("ai:chunk", listener);
+      });
+    },
     cancel: (requestId: string) => ipcRenderer.invoke("ai:cancel", requestId),
     status: () => ipcRenderer.invoke("ai:status"),
+  },
+  memory: {
+    get: () => ipcRenderer.invoke("memory:get"),
+    clear: () => ipcRenderer.invoke("memory:clear"),
+    setUserName: (userName: string) => ipcRenderer.invoke("memory:setUserName", userName),
   },
 });

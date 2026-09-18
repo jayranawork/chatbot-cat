@@ -4,5 +4,5 @@ export interface AiProvider {
   readonly id: string;
   readonly displayName: string;
   isAvailable(): Promise<boolean>;
-  complete(request: AiRequest, signal?: AbortSignal): Promise<AiResponse>;
+  complete(request: AiRequest, signal?: AbortSignal, onChunk?: (chunk: string) => void): Promise<AiResponse>;
 }

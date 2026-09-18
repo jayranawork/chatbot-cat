@@ -2,6 +2,10 @@ import type { CatEventName, CatReminder, CatState } from "./CatTypes";
 
 type EventPayloads = {
   CAT_ASSETS_READY: undefined;
+  AI_CANCELLED: undefined;
+  AI_COMPLETED: undefined;
+  AI_FAILED: undefined;
+  AI_REQUEST_STARTED: undefined;
   CAT_DRAG_END: undefined;
   CAT_DRAG_START: undefined;
   CAT_REMINDER: CatReminder;

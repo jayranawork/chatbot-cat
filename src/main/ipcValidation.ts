@@ -29,3 +29,4 @@ export const aiRequestPayloadSchema = z
   .strict();
 
 export const aiRequestIdSchema = z.string().min(1).max(100);
+export const memoryUserNameSchema = z.string().trim().min(1).max(80);

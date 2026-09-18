@@ -477,8 +477,8 @@ body {
   cursor: pointer;
 }
 
-/* AI chat theme only. Reminders and Controls keep their existing palette. */
-.cat-panel:has(.cat-ai-panel) {
+/* Shared panel theme for Reminders, Controls, and AI chat. */
+.cat-panel {
   --chat-bg-top: #0f1115;
   --chat-bg-bottom: #171a21;
   --chat-card-cat: #1a1d24;
@@ -492,6 +492,30 @@ body {
   --chat-error: #f2555a;
   background: linear-gradient(180deg, var(--chat-bg-top), var(--chat-bg-bottom));
   color: var(--chat-text-primary);
+}
+
+.cat-panel__tab--active,
+.cat-controls__wideButton--active {
+  background: linear-gradient(180deg, rgba(108, 140, 255, 0.28), rgba(108, 140, 255, 0.18));
+  border-color: rgba(108, 140, 255, 0.5);
+  color: var(--chat-text-primary);
+}
+
+.cat-panel__primary,
+.cat-panel__demo button,
+.cat-panel__actions button {
+  background: linear-gradient(180deg, var(--chat-accent-hover), var(--chat-accent));
+  color: #ffffff;
+}
+
+.cat-panel__field input:focus,
+.cat-panel__field select:focus {
+  border-color: var(--chat-accent);
+  box-shadow: 0 0 0 2px rgba(108, 140, 255, 0.12);
+}
+
+.cat-controls__toggle input {
+  accent-color: var(--chat-accent);
 }
 
 .cat-panel:has(.cat-ai-panel) .cat-panel__header h2 {
@@ -519,6 +543,22 @@ body {
   color: var(--chat-text-secondary);
 }
 
+.cat-panel:has(.cat-ai-panel) .cat-ai-panel__memory {
+  margin-left: auto;
+  border: 1px solid var(--chat-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--chat-text-secondary);
+  padding: 3px 7px;
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+
+.cat-panel:has(.cat-ai-panel) .cat-ai-panel__memory:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--chat-text-primary);
+}
+
 .cat-ai-panel__form button {
   border: 1px solid rgba(240, 178, 60, 0.6);
   border-radius: 8px;
@@ -538,6 +578,12 @@ body {
 .cat-panel:has(.cat-ai-panel) .cat-ai-panel__form button:hover:not(:disabled) {
   background: var(--chat-accent-hover);
   border-color: var(--chat-accent-hover);
+}
+
+.cat-panel:has(.cat-ai-panel) .cat-ai-panel__form button {
+  min-height: 36px;
+  padding: 5px 9px;
+  font-size: 0.72rem;
 }
 
 .cat-panel:has(.cat-ai-panel) .cat-ai-panel__form .cat-ai-panel__stop {
@@ -757,6 +803,9 @@ body {
 }
 
 .cat-panel:has(.cat-ai-panel) .cat-ai-panel__form textarea {
+  min-height: 36px;
+  max-height: 72px;
+  padding: 7px 9px;
   background: rgba(9, 11, 15, 0.72);
   border-color: var(--chat-border);
   color: var(--chat-text-primary);
@@ -769,6 +818,25 @@ body {
 .cat-panel:has(.cat-ai-panel) .cat-ai-panel__form textarea:focus {
   border-color: var(--chat-accent);
   box-shadow: 0 0 0 2px rgba(108, 140, 255, 0.12);
+}
+
+/* Keep the same cool accent on the non-AI tabs. */
+.cat-panel .cat-panel__tab--active,
+.cat-panel .cat-controls__wideButton--active {
+  background: linear-gradient(180deg, rgba(108, 140, 255, 0.28), rgba(108, 140, 255, 0.18));
+  border-color: rgba(108, 140, 255, 0.5);
+  color: var(--chat-text-primary);
+}
+
+.cat-panel .cat-panel__primary,
+.cat-panel .cat-panel__demo button,
+.cat-panel .cat-panel__actions button {
+  background: linear-gradient(180deg, var(--chat-accent-hover), var(--chat-accent));
+  color: #ffffff;
+}
+
+.cat-panel .cat-controls__toggle input {
+  accent-color: var(--chat-accent);
 }
 
 .cat-panel__field input:hover,

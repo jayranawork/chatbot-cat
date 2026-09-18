@@ -10,12 +10,15 @@ import type { AppRuntimeInfo } from "../shared/appRuntimeInfo";
 import type { AppDevSignal } from "../shared/devSignal";
 import { DEFAULT_WINDOW_SIZE, PANEL_WINDOW_SIZE } from "../shared/constants";
 import { AiService } from "../ai/AiService";
+import { CAT_IDENTITY_PROMPT } from "../ai/identity";
 import { OllamaProvider, OLLAMA_DEFAULT_MODEL } from "../ai/OllamaProvider";
-import { aiRequestIdSchema, aiRequestPayloadSchema, appSettingsPatchSchema } from "./ipcValidation";
+import { appendRecentHistory, clearMemory, createMemoryStore, readMemory, setConversationSummary, setMemoryUserName } from "../ai/memoryStore";
+import { aiRequestIdSchema, aiRequestPayloadSchema, appSettingsPatchSchema, memoryUserNameSchema } from "./ipcValidation";
 
 let mainWindow: ReturnType<typeof createMainWindow> | null = null;
 let restoreWindow: BrowserWindow | null = null;
 let appSettingsStore: ReturnType<typeof createAppSettingsStore> | null = null;
+let memoryStore: ReturnType<typeof createMemoryStore> | null = null;
 let appSettings: AppSettings = defaultAppSettings;
 let trayController: ReturnType<typeof createAppTray> | null = null;
 let devSignalWatcher: ReturnType<typeof watchFile> | null = null;
@@ -26,6 +29,9 @@ let roamDirection = 1;
 let quitting = false;
 const ollamaProvider = new OllamaProvider();
 const aiService = new AiService(ollamaProvider);
+const summaryAiService = new AiService(ollamaProvider, 10_000);
+let conversationPairCount = 0;
+let summarizationBuffer: Array<{ role: "user" | "assistant"; content: string }> = [];
 const dragAnchors = new Map<
   number,
   {
@@ -34,6 +40,39 @@ const dragAnchors = new Map<
     timer: NodeJS.Timeout | null;
   }
 >();
+
+function extractUserName(message: string) {
+  const match = message.match(/\b(?:my name is|call me|i am|i'm)\s+([A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,2})/i);
+  if (!match) return null;
+  const name = match[1].replace(/[.,!?;:]+$/g, "").trim().slice(0, 80);
+  return name || null;
+}
+
+function summarizeConversationInBackground() {
+  if (!memoryStore || summarizationBuffer.length === 0) return;
+  const conversation = summarizationBuffer.slice(-10);
+  summarizationBuffer = [];
+  conversationPairCount = 0;
+  const prompt = `Summarize this conversation in 2-3 short sentences. Preserve any names, preferences, or facts mentioned. Conversation:\n${conversation
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n")}`;
+  void summaryAiService.run({
+    requestId: `summary-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    model: OLLAMA_DEFAULT_MODEL,
+    messages: [
+      {
+        role: "system",
+        content: "You are Desktop Dev Cat. Summarize briefly and accurately in plain text.",
+      },
+      { role: "user", content: prompt },
+    ],
+  }).then((response) => {
+    const summary = response.text.trim();
+    if (summary && memoryStore) setConversationSummary(memoryStore, summary);
+  }).catch(() => {
+    // Background memory maintenance must never surface an error to the user.
+  });
+}
 
 if (process.env.DESKTOP_DEV_CAT_DISABLE_GPU === "1") {
   app.disableHardwareAcceleration();
@@ -612,6 +651,12 @@ function registerControlIpc() {
     const validatedPatch = appSettingsPatchSchema.parse(patch);
     return syncSettingsPatch(validatedPatch);
   });
+  ipcMain.handle("memory:get", () => (memoryStore ? readMemory(memoryStore) : null));
+  ipcMain.handle("memory:clear", () => (memoryStore ? clearMemory(memoryStore) : null));
+  ipcMain.handle("memory:setUserName", (_, userName: unknown) => {
+    if (!memoryStore) return null;
+    return setMemoryUserName(memoryStore, memoryUserNameSchema.parse(userName));
+  });
   ipcMain.handle("app-runtime:get", () => getRuntimeInfo());
   ipcMain.handle("app-dev-signal:get", () => devSignal);
   ipcMain.handle("app-window:show", () => {
@@ -642,21 +687,48 @@ function registerControlIpc() {
   });
   ipcMain.handle("ai:request", async (_, payload: unknown) => {
     const request = aiRequestPayloadSchema.parse(payload);
-    const history = request.history ?? [];
+    const detectedName = extractUserName(request.message);
+    if (detectedName && memoryStore) {
+      setMemoryUserName(memoryStore, detectedName);
+    }
+    const memory = memoryStore ? readMemory(memoryStore) : null;
+    const memoryContext = [
+      memory?.userName ? `The user's name is ${memory.userName}.` : "",
+      memory?.catName ? `You are known as ${memory.catName}.` : "",
+      memory?.conversationSummary ? `Summary of earlier conversation: ${memory.conversationSummary}` : "",
+    ].filter(Boolean).join(" ");
 
-    return aiService.run({
+    const response = await aiService.run({
       requestId: request.requestId,
       model: OLLAMA_DEFAULT_MODEL,
       messages: [
         {
           role: "system",
-          content:
+          content: [
+            CAT_IDENTITY_PROMPT,
             "You are Desktop Dev Cat, a concise and kind local developer companion. Give practical answers in plain text. Never claim to have run commands or changed files.",
+            memoryContext,
+          ].filter(Boolean).join(" "),
         },
-        ...history,
+        ...(memory?.recentHistory ?? []),
         { role: "user", content: request.message },
       ],
+    }, (chunk) => {
+      mainWindow?.webContents.send("ai:chunk", { requestId: request.requestId, chunk });
     });
+    if (memoryStore) {
+      appendRecentHistory(memoryStore, [
+        { role: "user", content: request.message },
+        { role: "assistant", content: response.text },
+      ]);
+    }
+    summarizationBuffer.push(
+      { role: "user", content: request.message },
+      { role: "assistant", content: response.text },
+    );
+    conversationPairCount += 1;
+    if (conversationPairCount >= 10) summarizeConversationInBackground();
+    return response;
   });
   ipcMain.handle("ai:cancel", (_, requestId: unknown) => {
     aiService.cancel(aiRequestIdSchema.parse(requestId));
@@ -715,6 +787,7 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
 
   appSettingsStore = createAppSettingsStore();
+  memoryStore = createMemoryStore();
   appSettings = readAppSettings(appSettingsStore);
   readDevSignalFromDisk();
   watchDevSignalFile();

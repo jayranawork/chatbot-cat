@@ -8,7 +8,10 @@ export type CatState =
   | "stretching"
   | "sleeping"
   | "happy"
-  | "angry";
+  | "angry"
+  | "thinking"
+  | "confused"
+  | "celebrating";
 
 export type CatAnimationKey =
   | "idle"
@@ -25,7 +28,11 @@ export type CatEventName =
   | "CAT_DRAG_START"
   | "CAT_DRAG_END"
   | "CAT_ASSETS_READY"
-  | "CAT_REMINDER";
+  | "CAT_REMINDER"
+  | "AI_REQUEST_STARTED"
+  | "AI_COMPLETED"
+  | "AI_FAILED"
+  | "AI_CANCELLED";
 
 export type CatAnimationLibrary = Record<CatAnimationKey, Texture[]>;
 

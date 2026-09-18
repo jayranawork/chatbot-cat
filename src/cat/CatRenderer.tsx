@@ -18,6 +18,7 @@ import { CatPropController } from "./CatPropController";
 import { getReminderContent, reminderKindOptions } from "./CatReminderContent";
 import { CatReminderScheduler } from "./CatReminderScheduler";
 import { CatStateMachine } from "./CatStateMachine";
+import { redact } from "../ai/redaction";
 import type { AppSettings } from "../shared/appSettings";
 import type { AppDevSignal } from "../shared/devSignal";
 import type { AppRuntimeInfo } from "../shared/appRuntimeInfo";
@@ -119,6 +120,7 @@ export function CatRenderer() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const launcherRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const controlsRef = useRef<RendererControls | null>(null);
   const remindersRef = useRef<CustomReminder[]>([]);
   const tapCountRef = useRef(0);
@@ -150,6 +152,7 @@ export function CatRenderer() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+  const [memoryClearLabel, setMemoryClearLabel] = useState("Clear Memory");
   const [customReminders, setCustomReminders] = useState<CustomReminder[]>(() =>
     loadStoredReminders(),
   );
@@ -162,6 +165,13 @@ export function CatRenderer() {
   const selectedReminderOption = reminderKindOptions.find(
     (option) => option.value === newReminderKind,
   );
+
+  useEffect(() => {
+    const messages = chatMessagesRef.current;
+    if (messages) {
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }, [chatMessages, chatBusy]);
 
   const updateAppSettings = async (patch: Partial<AppSettings>) => {
     const nextSettings = await window.desktopDevCat.setAppSettings(patch);
@@ -397,6 +407,8 @@ export function CatRenderer() {
     let removeEdgeContactListener: (() => void) | null = null;
     let removeSettingsListener: (() => void) | null = null;
     let removeRoamStateListener: (() => void) | null = null;
+    let removeAiEventListeners: (() => void) | null = null;
+    let aiMoodTimer: number | null = null;
 
     async function setupScene() {
       const pixiApp = new Application();
@@ -581,6 +593,52 @@ export function CatRenderer() {
         animatedCat.animationSpeed = animation.speed;
         animatedCat.loop = animation.loop;
         animatedCat.gotoAndPlay(0);
+      };
+
+      const moveToAiState = (state: Extract<CatState, "thinking" | "celebrating" | "confused">) => {
+        if (stateMachine.getState() !== "idle" && stateMachine.getState() !== "thinking") {
+          applyState("idle");
+        }
+        if (state !== "thinking" && stateMachine.getState() !== "thinking") {
+          applyState("thinking");
+        }
+        applyState(state);
+      };
+
+      const finishAiMood = (state: Extract<CatState, "celebrating" | "confused">) => {
+        if (aiMoodTimer !== null) {
+          window.clearTimeout(aiMoodTimer);
+        }
+        moveToAiState(state);
+        aiMoodTimer = window.setTimeout(() => {
+          aiMoodTimer = null;
+          if (!dragging) {
+            applyState("idle");
+          }
+        }, 1500);
+      };
+
+      const removeAiStarted = catEvents.on("AI_REQUEST_STARTED", () => {
+        moveToAiState("thinking");
+      });
+      const removeAiCompleted = catEvents.on("AI_COMPLETED", () => {
+        finishAiMood("celebrating");
+      });
+      const removeAiFailed = catEvents.on("AI_FAILED", () => {
+        finishAiMood("confused");
+      });
+      const removeAiCancelled = catEvents.on("AI_CANCELLED", () => {
+        if (aiMoodTimer !== null) {
+          window.clearTimeout(aiMoodTimer);
+          aiMoodTimer = null;
+        }
+        applyState("idle");
+      });
+      removeAiEventListeners = () => {
+        removeAiStarted();
+        removeAiCompleted();
+        removeAiFailed();
+        removeAiCancelled();
       };
 
       const handlePointerMove = (event: FederatedPointerEvent) => {
@@ -862,6 +920,14 @@ export function CatRenderer() {
         removeRoamStateListener();
         removeRoamStateListener = null;
       }
+      if (removeAiEventListeners) {
+        removeAiEventListeners();
+        removeAiEventListeners = null;
+      }
+      if (aiMoodTimer !== null) {
+        window.clearTimeout(aiMoodTimer);
+        aiMoodTimer = null;
+      }
       window.desktopDevCat.endWindowDrag();
 
       if (secretTapResetRef.current !== null) {
@@ -914,12 +980,18 @@ export function CatRenderer() {
     }
 
     const requestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const nextMessages = [...chatMessages, { role: "user" as const, content: message }];
+    const assistantIndex = chatMessages.length + 1;
+    const nextMessages = [
+      ...chatMessages,
+      { role: "user" as const, content: message },
+      { role: "assistant" as const, content: "" },
+    ];
     setChatMessages(nextMessages);
     setChatInput("");
     setChatBusy(true);
     setChatError(null);
     aiRequestIdRef.current = requestId;
+    catEvents.emit("AI_REQUEST_STARTED", undefined);
 
     try {
       const response = await window.desktopDevCat.ai.request({
@@ -927,10 +999,22 @@ export function CatRenderer() {
         kind: "chat",
         message,
         history: chatMessages,
+      }, (chunk) => {
+        setChatMessages((current) => current.map((item, index) =>
+          index === assistantIndex ? { ...item, content: item.content + chunk } : item,
+        ));
       });
-      setChatMessages((current) => [...current, { role: "assistant", content: response.text }]);
+      setChatMessages((current) => current.map((item, index) =>
+        index === assistantIndex ? { ...item, content: response.text } : item,
+      ));
+      if (aiRequestIdRef.current === requestId) {
+        catEvents.emit("AI_COMPLETED", undefined);
+      }
     } catch (error) {
       setChatError(error instanceof Error ? error.message : "Could not reach Ollama.");
+      if (aiRequestIdRef.current === requestId) {
+        catEvents.emit("AI_FAILED", undefined);
+      }
     } finally {
       if (aiRequestIdRef.current === requestId) {
         aiRequestIdRef.current = null;
@@ -945,9 +1029,59 @@ export function CatRenderer() {
     }
 
     await window.desktopDevCat.ai.cancel(aiRequestIdRef.current);
+    catEvents.emit("AI_CANCELLED", undefined);
     setChatBusy(false);
     setChatError("Request cancelled.");
     aiRequestIdRef.current = null;
+  };
+
+  const explainLastSignal = async () => {
+    if (!devSignal || chatBusy) {
+      return;
+    }
+
+    const requestId = `signal-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const safeSignal = redact(JSON.stringify(devSignal, null, 2));
+    setPanelTab("ai");
+    setPanelOpen(true);
+    void window.desktopDevCat.setPanelMode(true);
+    setChatBusy(true);
+    setChatError(null);
+    aiRequestIdRef.current = requestId;
+    catEvents.emit("AI_REQUEST_STARTED", undefined);
+
+    try {
+      const assistantIndex = chatMessages.length;
+      setChatMessages((current) => [...current, { role: "assistant", content: "" }]);
+      const response = await window.desktopDevCat.ai.request({
+        requestId,
+        kind: "chat",
+        message:
+          "Explain this latest developer signal. Identify what happened, likely causes, and practical next steps. Keep the explanation concise.\n\nLatest signal:\n" +
+          safeSignal,
+        history: chatMessages,
+      }, (chunk) => {
+        setChatMessages((current) => current.map((item, index) =>
+          index === assistantIndex ? { ...item, content: item.content + chunk } : item,
+        ));
+      });
+      setChatMessages((current) => current.map((item, index) =>
+        index === assistantIndex ? { ...item, content: response.text } : item,
+      ));
+      if (aiRequestIdRef.current === requestId) {
+        catEvents.emit("AI_COMPLETED", undefined);
+      }
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "Could not reach Ollama.");
+      if (aiRequestIdRef.current === requestId) {
+        catEvents.emit("AI_FAILED", undefined);
+      }
+    } finally {
+      if (aiRequestIdRef.current === requestId) {
+        aiRequestIdRef.current = null;
+      }
+      setChatBusy(false);
+    }
   };
 
   const handleChatKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -963,6 +1097,12 @@ export function CatRenderer() {
     await navigator.clipboard.writeText(content);
     setCopiedMessageIndex(index);
     window.setTimeout(() => setCopiedMessageIndex(null), 1400);
+  };
+
+  const clearAiMemory = async () => {
+    await window.desktopDevCat.memory.clear();
+    setMemoryClearLabel("Cleared");
+    window.setTimeout(() => setMemoryClearLabel("Clear Memory"), 1500);
   };
 
   const toggleReminder = (id: string) => {
@@ -1269,6 +1409,14 @@ export function CatRenderer() {
                     <strong>{devSignal?.cwd ?? "Shared signal only."}</strong>
                   </div>
                 </div>
+                <button
+                  className="cat-controls__wideButton"
+                  type="button"
+                  disabled={!devSignal || chatBusy}
+                  onClick={() => void explainLastSignal()}
+                >
+                  {devSignal ? "Explain Last Signal" : "No recent signal yet"}
+                </button>
               </section>
 
               <section className="cat-controls__group">
@@ -1328,8 +1476,11 @@ export function CatRenderer() {
                     ? `Local AI ready · ${aiStatus.model}`
                     : "Local AI unavailable"}
                 </span>
+                <button className="cat-ai-panel__memory" type="button" onClick={() => void clearAiMemory()}>
+                  {memoryClearLabel}
+                </button>
               </div>
-              <div className="cat-ai-panel__messages" aria-live="polite">
+              <div ref={chatMessagesRef} className="cat-ai-panel__messages" aria-live="polite">
                 {chatMessages.length === 0 ? (
                   <p className="cat-panel__empty">Ask me about your code, build, or anything else.</p>
                 ) : (

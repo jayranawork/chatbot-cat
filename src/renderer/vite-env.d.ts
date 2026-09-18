@@ -4,6 +4,7 @@ import type { AppSettings } from "../shared/appSettings";
 import type { AppRuntimeInfo } from "../shared/appRuntimeInfo";
 import type { AppDevSignal } from "../shared/devSignal";
 import type { AiChatRequestPayload, AiResponse, AiStatus } from "../ai/AiTypes";
+import type { AiMemory } from "../ai/memoryStore";
 
 declare global {
   interface Window {
@@ -35,9 +36,14 @@ declare global {
       setPanelMode: (enabled: boolean) => Promise<void>;
       toggleWindow: () => Promise<void>;
       ai: {
-        request: (payload: AiChatRequestPayload) => Promise<AiResponse>;
+        request: (payload: AiChatRequestPayload, onChunk?: (chunk: string) => void) => Promise<AiResponse>;
         cancel: (requestId: string) => Promise<void>;
         status: () => Promise<AiStatus>;
+      };
+      memory: {
+        get: () => Promise<AiMemory | null>;
+        clear: () => Promise<AiMemory | null>;
+        setUserName: (userName: string) => Promise<AiMemory | null>;
       };
     };
   }

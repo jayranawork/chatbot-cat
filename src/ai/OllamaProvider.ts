@@ -24,7 +24,7 @@ export class OllamaProvider implements AiProvider {
     }
   }
 
-  async complete(request: AiRequest, signal?: AbortSignal): Promise<AiResponse> {
+  async complete(request: AiRequest, signal?: AbortSignal, onChunk?: (chunk: string) => void): Promise<AiResponse> {
     const start = Date.now();
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
@@ -32,7 +32,7 @@ export class OllamaProvider implements AiProvider {
       body: JSON.stringify({
         model: request.model ?? this.defaultModel,
         messages: request.messages,
-        stream: false,
+        stream: Boolean(onChunk),
       }),
       signal,
     });
@@ -41,12 +41,41 @@ export class OllamaProvider implements AiProvider {
       throw new Error(`Ollama responded with status ${response.status}`);
     }
 
-    const data = (await response.json()) as {
-      message?: { content?: unknown };
+    if (!onChunk || !response.body) {
+      const data = (await response.json()) as { message?: { content?: unknown } };
+      return {
+        text: typeof data.message?.content === "string" ? data.message.content : "",
+        providerId: this.id,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = "";
+    let text = "";
+    const processLine = (line: string) => {
+      if (!line.trim()) return;
+      const data = JSON.parse(line) as { message?: { content?: unknown } };
+      const chunk = typeof data.message?.content === "string" ? data.message.content : "";
+      if (chunk) {
+        text += chunk;
+        onChunk(chunk);
+      }
     };
 
+    while (true) {
+      const { done, value } = await reader.read();
+      buffered += decoder.decode(value, { stream: !done });
+      const lines = buffered.split("\n");
+      buffered = lines.pop() ?? "";
+      lines.forEach(processLine);
+      if (done) break;
+    }
+    processLine(buffered);
+
     return {
-      text: typeof data.message?.content === "string" ? data.message.content : "",
+      text,
       providerId: this.id,
       durationMs: Date.now() - start,
     };
